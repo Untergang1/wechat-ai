@@ -1,6 +1,6 @@
 # WeChat-AI Bot Python deps for the Docker image (Python 3.12 venv).
 #
-# Docker passes --find-links for CPU PyTorch wheels. Keep torch/torchvision
+# Docker passes the official CPU PyTorch index via --extra-index-url. Keep torch/torchvision
 # pinned here so ultralytics does not pull CUDA-enabled PyPI wheels.
 torch==2.7.1+cpu; platform_system == "Linux" and platform_machine == "x86_64"
 torch==2.7.1+cpu; platform_system == "Linux" and platform_machine == "aarch64"

@@ -286,6 +286,8 @@ docker compose logs -f wechat-ai
 tail -f config/logs/bot.log
 ```
 
+Docker 构建默认沿用基础镜像的 Ubuntu 软件源，不再替换为第三方镜像源；Python 依赖使用官方 PyPI（`https://pypi.org/simple`），PyTorch CPU 包使用官方索引（`https://download.pytorch.org/whl/cpu`）。这两个 Python 索引分别由构建参数 `PIP_INDEX_URL` 和 `PYTORCH_INDEX_URL` 配置。
+
 使用当前 `./config` 重建并重启：
 
 ```bash

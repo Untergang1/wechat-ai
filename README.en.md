@@ -14,6 +14,12 @@ guide.
 docker compose up -d --build
 ```
 
+Docker builds retain the base image's Ubuntu repositories without third-party
+mirror overrides. Python dependencies use official PyPI (`https://pypi.org/simple`),
+with the official PyTorch CPU index (`https://download.pytorch.org/whl/cpu`) as an
+additional index. These Python indexes are configured by the `PIP_INDEX_URL` and
+`PYTORCH_INDEX_URL` build arguments, respectively.
+
 Default host URLs:
 
 | Service | URL |

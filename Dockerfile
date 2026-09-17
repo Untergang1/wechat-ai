@@ -7,16 +7,12 @@ LABEL org.opencontainers.image.description="Linux WeChat with Selkies WebRTC and
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG APT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
-ARG PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
-ARG PYTORCH_FIND_LINKS="https://mirrors.aliyun.com/pytorch-wheels/cpu/"
+ARG PIP_INDEX_URL="https://pypi.org/simple"
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
 
 RUN echo "Building WeChat-AI on ${BUILDPLATFORM}, targeting ${TARGETPLATFORM}"
 
-RUN if [ -n "${APT_MIRROR}" ]; then \
-        sed -i "s|http://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|http://security.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|https://archive.ubuntu.com/ubuntu|${APT_MIRROR}|g; s|https://security.ubuntu.com/ubuntu|${APT_MIRROR}|g" /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true; \
-    fi
-
+# Use the Ubuntu repositories supplied by the base image without mirror overrides.
 # WeChat runtime, Openbox helpers, RPA tools, and Python 3.12 for the bot.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -59,7 +55,7 @@ RUN case "$TARGETPLATFORM" in \
 
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    /opt/venv-bot/bin/pip install --find-links "${PYTORCH_FIND_LINKS}" -r /tmp/requirements.txt && \
+    /opt/venv-bot/bin/pip install --extra-index-url "${PYTORCH_INDEX_URL}" -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
 
 COPY pyproject.toml /app/
