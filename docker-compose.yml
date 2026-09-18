@@ -38,8 +38,8 @@ services:
     devices:
       - /dev/dri:/dev/dri
     ports:
-      - "${HTTP_PORT:-3100}:3000"
-      - "${HTTPS_PORT:-3101}:3001"
-      - "${MCP_PORT:-8100}:8000"
+      - "127.0.0.1:${HTTP_PORT:-3100}:3000"
+      - "127.0.0.1:${HTTPS_PORT:-3101}:3001"
+      - "127.0.0.1:${MCP_PORT:-8100}:8000"
     restart: unless-stopped
     shm_size: "${SHM_SIZE:-2gb}"
