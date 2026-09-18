@@ -234,7 +234,8 @@ bot 服务以 root 运行，是为了读取 `/proc/<wechat-pid>/mem`。微信、
 常用配置项：
 
 - `database.enabled`：启用数据库读取。
-- `database.scan_keys`：扫描微信进程内存中的 SQLCipher key。
+- `database.key_file`：本地 `0600` 凭据文件；配置后是唯一 key 来源，启动和刷新时验证并加载。恢复方法见[数据库凭据与恢复](docs/database-credentials.md)。
+- `database.scan_keys`：仅在 `key_file` 为空时使用现有内存 scanner。
 - `aes_xor_key`：图片 DAT 解密参数，格式如 `AES文本key,60` 或 `hex:<hexkey>,60`；留空则只解析媒体路径。
 - `rpa.window.*`：控制微信窗口目标尺寸，服务 RPA 和 YOLO 对齐。
 - `visual_message.*`：OCR/YOLO 视觉读取兜底配置。

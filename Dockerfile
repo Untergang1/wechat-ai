@@ -63,6 +63,7 @@ COPY README.md README.en.md LICENSE CREDITS.md /app/
 COPY docs/ /app/docs/
 COPY src/ /app/src/
 COPY tests/ /app/tests/
+COPY tools/ /app/tools/
 COPY config.example.yaml /app/config.example.yaml
 RUN --mount=type=cache,target=/root/.cache/pip \
     cd /app && /opt/venv-bot/bin/pip install --no-deps -e .

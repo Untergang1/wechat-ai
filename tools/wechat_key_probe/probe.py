@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import selectors
 import shutil
 import signal
@@ -251,6 +252,22 @@ def verify_copy(container, image, database, key, work):
             return {"opened": False, "stage": "verifier_output", "error_type": "InvalidJSON"}
 
 
+def write_verified_keys(container, path, database_root, entries):
+    script = '''
+import json,sys
+from pathlib import Path
+from wechat_ai_bot.services.core.linux_key_file import merge_key_file
+try:
+    data=json.load(sys.stdin)
+    count=merge_key_file(Path(data['path']),Path(data['root']),data['keys'])
+    print(json.dumps({'written':True,'entry_count':count}))
+except Exception as exc:
+    print(json.dumps({'written':False,'error_type':type(exc).__name__}))
+'''
+    return json.loads(docker("exec", "-i", container, "/opt/venv-bot/bin/python", "-c", script,
+                             input=json.dumps({"path": path, "root": database_root, "keys": entries}).encode()))
+
+
 def startup(container, pid):
     """One graceful replacement. Returns new host PID and restoration callback."""
     info = container_info(container)
@@ -371,16 +388,34 @@ def run(args):
         restore()
     report["unique_candidates"] = len(seen)
     verified = False
+    verified_entries = {}
+    required_ids = {d["id"] for d in databases
+                    if d["container_path"].endswith("/contact/contact.db")
+                    or re.search(r"/message/message_\d+\.db$", d["container_path"])}
     for db in sorted(databases, key=lambda d: d["size"]):
         row = {"id": db["id"], "name": db["name"], "hmac_valid": db["id"] in found}
-        if row["hmac_valid"] and not verified and db["size"] <= 64 * 1024 * 1024:
+        if row["hmac_valid"] and (db["id"] in required_ids or not verified):
             try:
                 row["copy_validation"] = verify_copy(args.container, info["Image"], db, found[db["id"]], args.work)
-                verified = row["copy_validation"].get("quick_check_ok", False)
-            except Exception:
-                row["copy_validation"] = {"error": "snapshot_or_verifier_failed"}
+                if row["copy_validation"].get("quick_check_ok", False):
+                    verified = True
+                    relative = Path(db["container_path"]).relative_to(args.database_root).as_posix()
+                    verified_entries[relative] = found[db["id"]].hex() + db["page"][:16].hex()
+            except Exception as exc:
+                row["copy_validation"] = {"error": "snapshot_or_verifier_failed",
+                                          "error_type": type(exc).__name__,
+                                          "reason": str(exc) if isinstance(exc, ProbeError) else ""}
         report["databases"].append(row)
+    report["core_unverified"] = [row["name"] for row in report["databases"]
+                                 if row["id"] in required_ids
+                                 and not row.get("copy_validation", {}).get("quick_check_ok")]
+    if args.write_key_file and verified_entries:
+        report["key_file_write"] = write_verified_keys(args.container, args.write_key_file,
+                                                       args.database_root, verified_entries)
+        if not report["key_file_write"].get("written"):
+            verified = False
     report["success"] = verified
+    report["core_verified"] = bool(required_ids) and not report["core_unverified"]
     return report
 
 
@@ -390,6 +425,8 @@ def main():
     parser.add_argument("--container", default="wechat-ai")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--max-hits", type=int, default=200)
+    parser.add_argument("--write-key-file", default="", help="Explicit container path; writes only copy-verified keys")
+    parser.add_argument("--database-root", default="/config/xwechat_files")
     parser.add_argument("--work", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 1 <= args.timeout <= 600 or not 1 <= args.max_hits <= 2000:
@@ -407,6 +444,9 @@ def main():
                     "--entrypoint", "/usr/sbin/chroot", image, "/host", "/usr/bin/python3", "-B",
                     str(Path(__file__).resolve()), args.mode, "--container", args.container,
                     "--timeout", str(args.timeout), "--max-hits", str(args.max_hits), "--work", work]
+            argv += ["--database-root", args.database_root]
+            if args.write_key_file:
+                argv += ["--write-key-file", args.write_key_file]
             return subprocess.call(argv)
     with tempfile.TemporaryDirectory(prefix="probe-", dir=args.work or "/tmp") as work:
         args.work = work

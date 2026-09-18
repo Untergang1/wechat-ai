@@ -100,6 +100,7 @@ class Bot:
                     "xwechat_files_root", "/config/xwechat_files"
                 ),
                 scan_keys=database_config.get("scan_keys", True),
+                key_file=database_config.get("key_file", ""),
                 active_account=database_config.get("active_account", ""),
                 key_retry_interval=database_config.get("key_retry_interval", 10.0),
                 message_map_refresh_interval=database_config.get(

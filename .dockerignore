@@ -1,0 +1,13 @@
+.git
+.env
+config
+config.backup-*
+config.clean-*
+plugins
+runtime_images
+logs
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache

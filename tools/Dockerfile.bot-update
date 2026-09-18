@@ -1,0 +1,9 @@
+# Code-only update for an existing wechat-ai image with matching dependencies.
+# Supply a local immutable base tag/ID; this never downloads a new WeChat build.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY src/ /app/src/
+COPY tests/ /app/tests/
+COPY tools/ /app/tools/
+COPY docs/ /app/docs/
+COPY README.md README.en.md config.example.yaml /app/

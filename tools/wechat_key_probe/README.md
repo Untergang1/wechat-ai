@@ -64,13 +64,27 @@ that guarantee. The result records debugger cleanup events and `TracerPid`.
 Output includes progress lines followed by redacted JSON; do not treat the
 entire stdout stream as a single JSON document.
 
-Captured material stays in controller/debugger memory and their private pipe.
+Captured material stays in controller/debugger memory and their private pipe
+unless the explicit `--write-key-file` option is used.
 Only validated page keys are considered for copy verification. Copy verification
 temporarily pauses discovered writable DB/WAL owners, copies DB and WAL without
 SHM, then resumes them. A five-second watchdog bounds normal snapshot pauses.
-Only one successful complete copy verification is required; other captured
-databases can remain HMAC-only. Copies larger than 64 MiB are skipped for this
-step. Temporary copies are deleted on normal completion.
+Every captured core database (contacts and numbered message shards) is copy
+verified, in addition to the first available candidate. Explicit core targets
+are not skipped based on file size; snapshot pauses and verification timeouts
+bound the operation. Temporary copies are deleted on normal completion.
+
+`--write-key-file /config/database_keys.json` explicitly persists copy-verified
+entries in the target container, through a private stdin pipe and the project's
+`linux_key_file` writer. The running container must contain that module. Existing
+valid entries are retained; writes use an atomic replacement with mode `0600`.
+`--database-root` defaults to `/config/xwechat_files` and defines relative paths
+in the file. No key value is printed. This changes the default in-memory-only
+retention policy only when requested explicitly.
+
+`core_unverified` reports missing core checks separately from `success` (at
+least one complete verification). Production readiness must also be checked
+through the service's `core_ready` and actual API/polling results.
 
 `capture-startup` additionally attempts one graceful application replacement,
 preserves its launch environment and account files, and temporarily stops the
@@ -101,10 +115,13 @@ Evidence collected during this task:
   failures preserve their stage instead of collapsing into a generic error.
 - Synthetic SQLCipher validation passes for correct input, rejects wrong input,
   identifies missing/malformed stdin, and leaves the fixture DB unchanged.
-- The real database copy check has **not** been rerun after this correction.
-  No actual WeChat restart, new capture, or cipher-parameter change was performed
-  as part of this synthetic follow-up. Neither all-database support nor production
-  integration is claimed.
+- A subsequent authorized recovery run verified copies of `contact.db` and
+  `message_0.db`, in addition to `session.db` and `hardlink.db`, and persisted only
+  the four verified credentials. No cipher-parameter change or WeChat restart
+  was needed. Production integration uses the credential file; it does not run
+  this debugger automatically. See the linked service recovery documentation.
 
-Generated reports, credentials, database copies and binaries belong outside the
-repository. Existing production scanner behavior remains unchanged.
+Generated reports, credentials, database copies and binaries must not be
+version-controlled. Runtime credentials use the ignored `/config` volume;
+temporary diagnostic artifacts belong outside the working tree. File-based
+production recovery is documented in [database credentials](../../docs/database-credentials.md).

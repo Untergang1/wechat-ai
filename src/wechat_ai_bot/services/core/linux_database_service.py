@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ from wechat_ai_bot.services.core.linux_sqlcipher import (
     import_sqlcipher_driver,
     sqlcipher_driver_name,
 )
+from wechat_ai_bot.services.core.linux_key_file import KeyFileResult, load_key_file
 from wechat_ai_bot.weixin.parser.util.common import get_md5_from_xml
 
 
@@ -64,6 +66,7 @@ class LinuxDatabaseService:
         *,
         xwechat_files_root: str | Path = "/config/xwechat_files",
         scan_keys: bool = True,
+        key_file: str | Path = "",
         active_account: str = "",
         key_retry_interval: float = 10.0,
         message_map_refresh_interval: float = 30.0,
@@ -72,6 +75,12 @@ class LinuxDatabaseService:
         self.user_info = user_info
         self.root = Path(xwechat_files_root)
         self.scan_keys_enabled = scan_keys
+        self.key_file = Path(key_file) if key_file else None
+        self._key_file_result = KeyFileResult()
+        self._core_missing: list[str] = []
+        self._core_query_errors: list[str] = []
+        self._key_file_signature = None
+        self._last_key_file_check = 0.0
         self.active_account = active_account
         self.key_retry_interval = key_retry_interval
         self.message_map_refresh_interval = message_map_refresh_interval
@@ -114,7 +123,7 @@ class LinuxDatabaseService:
                 len(self._keys),
             )
 
-    def refresh(self, *, preserve_sequences: bool = False) -> dict[str, Any]:
+    def refresh(self, *, preserve_sequences: bool = True) -> dict[str, Any]:
         """Refresh discovery, keyring, caches, and polling baselines."""
         with self._lock:
             previous_sequences = dict(self._table_sequences) if preserve_sequences else {}
@@ -124,14 +133,21 @@ class LinuxDatabaseService:
                 except Exception:
                     pass
             self._connections.clear()
+            self._contact_by_username.clear()
+            self._contact_by_id.clear()
+            self._room_by_md5.clear()
+            self._chat_rooms.clear()
             self.last_error = ""
             self._consecutive_poll_errors = 0
             self._discover_accounts()
-            if self.scan_keys_enabled:
+            if self.key_file:
+                self._load_file_keys()
+            elif self.scan_keys_enabled:
                 self.rescan_keys()
             else:
                 self.last_error = "database.scan_keys is disabled"
             self._select_primary_account()
+            self._check_core_databases()
             if self._primary_account:
                 self.user_info.data_dir = str(self._primary_account.account_dir)
                 self.user_info.account = self.user_info.account or self._primary_account.account_id
@@ -156,6 +172,9 @@ class LinuxDatabaseService:
     def rescan_keys(self) -> dict[str, Any]:
         with self._lock:
             self._discover_accounts()
+            if self.key_file:
+                self._load_file_keys()
+                return self._key_file_result.redacted()
             encrypted_paths = [
                 path
                 for account in self._accounts
@@ -169,6 +188,60 @@ class LinuxDatabaseService:
             if self._scan_result.errors and not self._keys:
                 self.last_error = "; ".join(self._scan_result.errors[-3:])
             return self._scan_result.redacted()
+
+    def _load_file_keys(self) -> None:
+        self._key_file_signature = self._credential_signature()
+        self._key_file_result = load_key_file(self.key_file, self.root, self.get_all_db_files())
+        for path, previous in self._keys.items():
+            if self._key_file_result.keys.get(path) != previous:
+                self._drop_connection(path)
+        self._keys = dict(self._key_file_result.keys)
+        if self._key_file_result.error:
+            self.last_error = self._key_file_result.error
+
+    def _credential_signature(self):
+        try:
+            info = self.key_file.lstat()
+            return (info.st_ino, info.st_mtime_ns, info.st_size, info.st_mode, info.st_uid)
+        except OSError:
+            return None
+
+    def _reload_changed_credentials(self) -> None:
+        if not self.key_file:
+            return
+        now = time.monotonic()
+        if now - self._last_key_file_check < max(0.0, self.key_retry_interval):
+            return
+        self._last_key_file_check = now
+        if self._credential_signature() != self._key_file_signature:
+            self.refresh(preserve_sequences=True)
+
+    def _check_core_databases(self) -> None:
+        self._core_missing = []
+        self._core_query_errors = []
+        if not self._primary_account:
+            self._core_missing = ["active_account"]
+            return
+        databases = self._primary_account.databases
+        required = ["contact/contact.db"] + sorted(
+            name for name in databases if re.fullmatch(r"message/message_\d+\.db", name)
+        )
+        if len(required) == 1:
+            self._core_missing.append("message/message_<number>.db")
+        for name in required:
+            path = databases.get(name)
+            if path is None or not self._has_key(path):
+                self._core_missing.append(name)
+                continue
+            try:
+                self._connection(path)
+                if name.startswith("message/"):
+                    self.execute_query(path, "select user_name from Name2Id limit 0")
+                    for table in self.get_db_tables(path):
+                        if table.startswith("Msg_"):
+                            self.execute_query(path, f"select {self._message_column_sql()} from {self._q(table)} limit 0")
+            except Exception:
+                self._core_query_errors.append(name)
 
     def execute_query(
         self,
@@ -217,6 +290,7 @@ class LinuxDatabaseService:
 
     def check_new_messages(self) -> list[tuple[str, tuple]]:
         with self._lock:
+            self._reload_changed_credentials()
             if not self.is_available:
                 return []
             self._refresh_message_maps_if_needed()
@@ -646,6 +720,12 @@ class LinuxDatabaseService:
             if self._last_auto_refresh_at
             else 0,
             "key_scan": self._scan_result.redacted(),
+            "key_source": "file" if self.key_file else "scanner",
+            "key_file": self._key_file_result.redacted() if self.key_file else None,
+            "core_ready": bool(self.is_available and self._contact_by_username
+                               and not self._core_missing and not self._core_query_errors),
+            "core_missing_databases": list(self._core_missing),
+            "core_query_errors": list(self._core_query_errors),
             "last_error": self.last_error,
         }
 

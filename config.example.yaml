@@ -32,7 +32,9 @@ dingtalk:
 database:
   enabled: true
   xwechat_files_root: /config/xwechat_files
-  # Reads WeChat process memory to find SQLCipher keys, keeps keys in memory only.
+  # When set, validated credentials from this 0600 file are the exclusive source.
+  key_file: ""
+  # Used only when key_file is empty. Does not run when a key file is configured.
   scan_keys: true
   active_account: ""
   poll_interval: 0.75
